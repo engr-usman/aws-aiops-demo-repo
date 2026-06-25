@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AIOps Log Analyzer</title>
+  <style>
+    * { box-sizing: border-box; font-family: Inter, Arial, sans-serif; margin: 0; padding: 0; }
+    body {
+      min-height: 100vh;
+      background: radial-gradient(circle at top left, rgba(255,153,0,0.25), transparent 35%),
+                  radial-gradient(circle at bottom right, rgba(35,47,62,0.9), transparent 40%),
+                  linear-gradient(135deg, #0f172a, #111827);
+      color: #fff;
+      padding: 40px 20px;
+    }
+    .container { max-width: 1180px; margin: auto; }
+    .hero { text-align: center; margin-bottom: 35px; }
+    .badge {
+      display: inline-block; padding: 8px 16px; border-radius: 999px;
+      background: rgba(255, 153, 0, 0.15); border: 1px solid rgba(255, 153, 0, 0.35);
+      color: #ffb84d; margin-bottom: 16px; font-weight: 600;
+    }
+    h1 {
+      font-size: 3rem; margin-bottom: 12px;
+      background: linear-gradient(90deg, #ff9900, #ffd580);
+      -webkit-background-clip: text; color: transparent;
+    }
+    .subtitle { color: #cbd5e1; font-size: 1.1rem; }
+    .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-top: 30px; }
+    .card {
+      background: rgba(15, 23, 42, 0.82); border: 1px solid rgba(148, 163, 184, 0.18);
+      border-radius: 22px; padding: 26px; box-shadow: 0 20px 45px rgba(0,0,0,0.35);
+      backdrop-filter: blur(12px);
+    }
+    .card h2 { margin-bottom: 16px; font-size: 1.35rem; }
+    textarea {
+      width: 100%; min-height: 300px; background: #020617; color: #e5e7eb;
+      border: 1px solid #334155; border-radius: 16px; padding: 18px;
+      font-size: 0.95rem; line-height: 1.6; outline: none; resize: vertical;
+    }
+    textarea:focus { border-color: #ff9900; box-shadow: 0 0 0 3px rgba(255,153,0,0.18); }
+    .sample-title { margin-top: 18px; margin-bottom: 10px; color: #cbd5e1; font-size: 0.95rem; font-weight: 600; }
+    .sample-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; margin-bottom: 18px; }
+    .sample-btn {
+      background: #111827; color: #e5e7eb; border: 1px solid #334155;
+      padding: 12px 14px; border-radius: 12px; font-size: 0.9rem; font-weight: 700;
+      cursor: pointer; transition: 0.2s ease; text-align: left;
+    }
+    .sample-btn:hover { border-color: #ff9900; background: rgba(255, 153, 0, 0.12); color: #ffb84d; }
+    .btn-row { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 18px; }
+    button { border: none; border-radius: 14px; padding: 14px 18px; font-size: 0.95rem; font-weight: 700; cursor: pointer; transition: 0.2s ease; }
+    .primary { background: #ff9900; color: #111827; }
+    .primary:hover { background: #ffb84d; transform: translateY(-1px); }
+    .secondary { background: #1e293b; color: #e5e7eb; border: 1px solid #334155; }
+    .secondary:hover { background: #334155; }
+    .result-grid { display: grid; gap: 14px; }
+    .result-box { background: #020617; border: 1px solid #1f2937; border-radius: 16px; padding: 16px; }
+    .result-box span { display: block; color: #ffb84d; font-weight: 700; margin-bottom: 8px; }
+    .result-box p { color: #e5e7eb; line-height: 1.5; }
+    .severity {
+      display: inline-block; padding: 6px 12px; border-radius: 999px; font-weight: 700;
+      background: rgba(239,68,68,0.15); color: #fca5a5; border: 1px solid rgba(239,68,68,0.3);
+    }
+    .status { margin-top: 16px; padding: 12px 14px; border-radius: 14px; display: none; font-size: 0.9rem; }
+    .status.success { display: block; background: rgba(34,197,94,0.12); border: 1px solid rgba(34,197,94,0.25); color: #86efac; }
+    .status.error { display: block; background: rgba(239,68,68,0.12); border: 1px solid rgba(239,68,68,0.25); color: #fca5a5; }
+    .footer { text-align: center; margin-top: 28px; color: #94a3b8; font-size: 0.95rem; }
+    @media (max-width: 900px) { .grid { grid-template-columns: 1fr; } .sample-grid { grid-template-columns: 1fr; } h1 { font-size: 2.2rem; } }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <section class="hero">
+      <div class="badge">AWS + Bedrock + Lambda + AIOps</div>
+      <h1>AI-Powered Log Analyzer</h1>
+      <p class="subtitle">Turn raw application logs into issue summary, root cause, fix, severity, and prevention steps.</p>
+    </section>
+
+    <section class="grid">
+      <div class="card">
+        <h2>Raw Logs</h2>
+        <textarea id="logs" placeholder="Paste application, database, Kubernetes, or infrastructure logs here..."></textarea>
+
+        <div class="sample-title">Choose a sample scenario:</div>
+        <div class="sample-grid">
+          <button class="sample-btn" onclick="loadSample('db')">Database Timeout</button>
+          <button class="sample-btn" onclick="loadSample('api')">500 Internal Server Error</button>
+          <button class="sample-btn" onclick="loadSample('alb')">ALB 503 Error</button>
+          <button class="sample-btn" onclick="loadSample('k8s')">Kubernetes CrashLoopBackOff</button>
+        </div>
+
+        <div class="btn-row">
+          <button class="primary" onclick="analyzeLogs()">Analyze with AI</button>
+          <button class="secondary" onclick="clearAll()">Clear</button>
+        </div>
+
+        <div id="status" class="status"></div>
+      </div>
+
+      <div class="card">
+        <h2>AI Analysis</h2>
+        <div class="result-grid">
+          <div class="result-box"><span>Issue</span><p id="issue">Waiting for analysis...</p></div>
+          <div class="result-box"><span>Root Cause</span><p id="rootCause">Waiting for analysis...</p></div>
+          <div class="result-box"><span>Fix</span><p id="fix">Waiting for analysis...</p></div>
+          <div class="result-box"><span>Severity</span><p><span id="severity" class="severity">N/A</span></p></div>
+          <div class="result-box"><span>Prevention</span><p id="prevention">Waiting for analysis...</p></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="footer">Demo Flow: Logs → API Gateway → Lambda → Amazon Bedrock → Human-readable AIOps Insight</div>
+  </div>
+
+  <script>
+    const API_URL = "https://YOUR_API_ID.execute-api.YOUR_REGION.amazonaws.com/analyze";
+
+    const samples = {
+      db: `ERROR: DB connection timeout after 30 seconds
+Application failed to connect to RDS endpoint
+Connection pool exhausted
+Multiple requests failed with HTTP 500
+Service: user-api
+Environment: production`,
+      api: `ERROR: 500 Internal Server Error
+Endpoint: /api/orders
+Service: order-service
+NullPointerException at OrderController.java:87
+Multiple customer requests failed
+Environment: production`,
+      alb: `ERROR: 503 Service Unavailable
+Application Load Balancer target group has unhealthy targets
+Health check failed on /health
+EC2 instance CPU utilization is above 95%
+Service: checkout-api
+Environment: production`,
+      k8s: `ERROR: Kubernetes Pod CrashLoopBackOff
+Namespace: production
+Pod: payment-api-7d9f8c7b9-x2m4p
+Container exited with code 137
+Reason: OOMKilled
+Memory limit exceeded
+Restart count: 8
+Service: payment-api`
+    };
+
+    function setStatus(message, type) {
+      const status = document.getElementById("status");
+      status.className = `status ${type}`;
+      status.innerText = message;
+    }
+
+    function loadSample(type) {
+      document.getElementById("logs").value = samples[type];
+      setStatus("Sample logs loaded. Click Analyze with AI.", "success");
+    }
+
+    function clearAll() {
+      document.getElementById("logs").value = "";
+      document.getElementById("issue").innerText = "Waiting for analysis...";
+      document.getElementById("rootCause").innerText = "Waiting for analysis...";
+      document.getElementById("fix").innerText = "Waiting for analysis...";
+      document.getElementById("severity").innerText = "N/A";
+      document.getElementById("prevention").innerText = "Waiting for analysis...";
+      document.getElementById("status").style.display = "none";
+    }
+
+    function setLoadingState() {
+      document.getElementById("issue").innerText = "Analyzing...";
+      document.getElementById("rootCause").innerText = "Analyzing...";
+      document.getElementById("fix").innerText = "Analyzing...";
+      document.getElementById("severity").innerText = "Processing";
+      document.getElementById("prevention").innerText = "Analyzing...";
+    }
+
+    async function analyzeLogs() {
+      const logs = document.getElementById("logs").value.trim();
+      if (!logs) {
+        setStatus("Please paste logs or choose a sample before analyzing.", "error");
+        return;
+      }
+
+      setLoadingState();
+      setStatus("Analyzing logs with Amazon Bedrock...", "success");
+
+      try {
+        const response = await fetch(API_URL, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ logs })
+        });
+
+        const data = await response.json();
+
+        if (!response.ok) throw new Error(JSON.stringify(data));
+
+        document.getElementById("issue").innerText = data.Issue || "Not available";
+        document.getElementById("rootCause").innerText = data["Root Cause"] || "Not available";
+        document.getElementById("fix").innerText = data.Fix || "Not available";
+        document.getElementById("severity").innerText = data.Severity || "N/A";
+        document.getElementById("prevention").innerText = data.Prevention || "Not available";
+
+        setStatus("Analysis completed successfully.", "success");
+      } catch (error) {
+        setStatus("Failed to analyze logs. Please check API Gateway CORS and Lambda logs.", "error");
+        console.error(error);
+      }
+    }
+  </script>
+</body>
+</html>
