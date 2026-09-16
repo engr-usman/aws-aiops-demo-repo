@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: broken-app
+  namespace: demo-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: broken-app
+  template:
+    metadata:
+      labels:
+        app: broken-app
+    spec:
+      containers:
+      - name: broken-app
+        image: polinux/stress
+        resources:
+          limits:
+            memory: "50Mi"
+          requests:
+            memory: "20Mi"
+        command: ["stress"]
+        args: ["--vm", "1", "--vm-bytes", "150M", "--vm-hang", "1"]

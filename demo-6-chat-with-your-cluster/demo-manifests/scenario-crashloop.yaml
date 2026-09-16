@@ -1,0 +1,25 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: broken-app
+  namespace: demo-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: broken-app
+  template:
+    metadata:
+      labels:
+        app: broken-app
+    spec:
+      containers:
+      - name: broken-app
+        image: busybox:1.36
+        command: ["sh", "-c"]
+        args:
+          - |
+            echo "[notice] Starting application..."
+            echo "[error] Failed to connect to database: connection refused on port 5432"
+            echo "[error] FATAL: Could not initialize application"
+            exit 1
