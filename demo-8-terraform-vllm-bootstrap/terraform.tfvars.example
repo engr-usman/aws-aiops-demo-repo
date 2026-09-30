@@ -1,0 +1,12 @@
+# Copy this file to terraform.tfvars and fill in your own values.
+# terraform.tfvars is gitignored by default in most setups — never commit
+# your real IP/key name if the repo is public, though neither is secret.
+
+key_name         = "your-ec2-key-pair-name"
+allowed_ssh_cidr = "YOUR.IP.ADDRESS.HERE/32"   # e.g. curl -s ifconfig.me, then add /32
+
+# Optional overrides (defaults shown):
+# aws_region             = "us-east-1"
+# instance_type          = "g6.xlarge"
+# root_volume_size_gb    = 100
+# auto_shutdown_minutes  = 180
