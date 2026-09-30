@@ -111,9 +111,55 @@ source of failures). `03-serve-model.sh` supports this via
 - **Maximum concurrency** for the configured `--max-model-len`: reported
   directly in the same log line (`2.41x` at 8192 tokens/request on this
   setup) — this is the practical ceiling for full-context concurrent
-  requests before requests start queueing.
-- Full throughput/latency numbers per concurrency level: see
-  `bench-results/*.txt` after running `04-run-benchmark.sh`.
+  requests before requests start queueing. In this benchmark, requests only
+  used ~768 tokens of context (512 in / 256 out), well under the 8192 cap,
+  so far more than 2.41 concurrent requests fit in practice (confirmed
+  below — 20 concurrent requests ran without failures).
+
+## Results — Qwen3-8B on g6.xlarge (L4), bfloat16, VLLM_USE_FLASHINFER_SAMPLER=0
+
+Load pattern: 512 input tokens / 256 output tokens per request, random
+dataset, `vllm bench serve`.
+
+| Concurrency | Output tok/s | Total tok/s | Median TTFT | Median TPOT | P99 TTFT |
+|---|---|---|---|---|---|
+| 1  | 16.45  | 49.35  | 177ms  | 60.4ms | 183ms  |
+| 5  | 73.29  | 219.88 | 726ms  | 65.7ms | 869ms  |
+| 10 | 135.51 | 406.52 | 1165ms | 68.9ms | 3203ms |
+| 20 | 223.15 | 669.46 | 1471ms | 82.9ms | **6666ms** |
+
+(Concurrency 50 was started but interrupted intentionally to control cost —
+no complete result for that level.)
+
+**Observations:**
+
+- **Throughput scales sub-linearly with concurrency.** C1→C5 (5x load) gave
+  4.45x throughput; C5→C10 (2x load) gave 1.85x; C10→C20 (2x load) gave
+  1.65x. Classic diminishing returns as the GPU approaches saturation.
+- **Per-request latency (TPOT) degrades under load** — 60ms at C1 up to
+  83ms at C20 (~38% slower per token for each individual user).
+- **Tail latency (P99 TTFT) is the real story.** Median TTFT grew 8x (177ms
+  → 1471ms) but P99 TTFT grew **36x** (183ms → 6666ms). This is the
+  queueing effect kicking in — some requests wait significantly before
+  processing starts even though the average looks reasonable. This is the
+  number that breaks production SLAs, not the median.
+- **Practical takeaway for this hardware/model pair:** ~10 concurrent users
+  is a reasonable ceiling for latency-sensitive use cases on a single L4 +
+  Qwen3-8B — throughput is solid (135 tok/s) and P99 TTFT (3.2s) is still
+  tolerable. Past that, tail latency risk increases sharply.
+- **GPU was power-limited, not just bandwidth-limited**, per `nvtop`
+  readings during the run: sustained `72W / 72W` (full TDP for the L4) at
+  99-100% utilization. Worth factoring into hardware selection for
+  sustained high-throughput workloads — a higher-TDP card (A100/H100) can
+  sustain higher clocks under load.
+
+## Session cost
+
+Full session (driver troubleshooting + setup + benchmark, concurrency 1
+through 20 plus a partial run at 50) ran approximately 1.5 hours on
+g6.xlarge — roughly **$1.20-1.30** at the rate used for this run. Instance
+was terminated and confirmed via `aws ec2 describe-instances` /
+`describe-volumes` after the session.
 
 ## Cost control
 
