@@ -14,6 +14,7 @@ set -euo pipefail
 
 echo "=== Updating package lists ==="
 sudo apt update
+sudo apt install nvtop
 
 echo "=== Installing kernel headers + build tools (required for driver DKMS build) ==="
 sudo apt install -y "linux-headers-$(uname -r)" build-essential
