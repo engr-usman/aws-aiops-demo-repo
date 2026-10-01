@@ -34,28 +34,43 @@ a reboot. This project works around that with a small state machine:
 
 All progress is logged to `/var/log/bootstrap.log` on the instance.
 
-## One script change required in the repo
+## vLLM runs as a proper systemd service, not a backgrounded script
 
-`03-serve-model.sh` normally ends with `tail -f ~/vllm.log`, which blocks
-forever — fine for a manual terminal session, fatal for a non-interactive
-systemd service (it would hang and never mark step 3 complete). This
-project's orchestrator calls it with `NO_WAIT_TAIL=true`, which requires
-`03-serve-model.sh` in the repo to support that flag.
+An earlier version of this bootstrap launched vLLM via `nohup ... &` inside
+the orchestrator. That approach had a real bug: when the oneshot
+`bootstrap-orchestrator.service` finishes and deactivates, systemd's default
+`KillMode=control-group` kills **every** process in that service's cgroup —
+including `nohup`'d background children. `nohup` only protects against
+`SIGHUP`, not systemd's cgroup cleanup. The result was a vLLM process that
+got silently killed moments after starting, before it even wrote its first
+log line.
 
-**`03-serve-model-updated.sh` in this folder is the patched version** —
-copy it over the existing `03-serve-model.sh` in your repo and commit it
-before applying this Terraform config:
+**Fix: vLLM is defined as its own independent systemd unit,
+`vllm-serve.service`**, entirely separate from the orchestrator's cgroup:
 
+- `user_data` writes `/opt/bootstrap/start-vllm.sh` (resolves `CUDA_HOME`
+  dynamically, then `exec`s `vllm serve` so systemd tracks the real process)
+  and `/etc/systemd/system/vllm-serve.service` (a normal `Type=simple`
+  service — `Restart=on-failure`, logs appended to `~/vllm.log`, same file
+  you'd tail in a manual run).
+- The unit is `enable`d immediately (so it also auto-starts after any future
+  reboot of the instance — a nice side effect), but not started yet, since
+  the driver and Python venv don't exist on first boot.
+- The orchestrator's Step 3 is now just `systemctl start vllm-serve.service`
+  — no backgrounding, no `nohup`, no cgroup-kill risk.
+
+Managing the server once it's running:
 ```bash
-cp 03-serve-model-updated.sh /path/to/aws-aiops-demo-repo/demo-7-vllm-with-model-installation/03-serve-model.sh
-cd /path/to/aws-aiops-demo-repo
-git add demo-7-vllm-with-model-installation/03-serve-model.sh
-git commit -m "Add NO_WAIT_TAIL support for non-interactive automation"
-git push
+systemctl status vllm-serve      # is it up, how long, recent restarts
+sudo systemctl stop vllm-serve     # stop it (e.g. to free port 8000 for a
+                                    # manual run with different flags)
+sudo systemctl restart vllm-serve
+tail -f ~/vllm.log                  # same log file as before
 ```
 
-Manual usage is unchanged (`./03-serve-model.sh` still streams the log as
-before) — only automated callers need to set `NO_WAIT_TAIL=true`.
+`03-serve-model.sh` in the repo is unchanged and still useful for manual,
+ad-hoc runs (different model, `--enforce-eager`, etc.) — just
+`sudo systemctl stop vllm-serve` first so it isn't competing for port 8000.
 
 ## Usage
 

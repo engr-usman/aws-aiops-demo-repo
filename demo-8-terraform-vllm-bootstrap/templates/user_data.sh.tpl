@@ -6,15 +6,20 @@
 # ends with a reboot — a plain user-data script would die mid-sequence when
 # that reboot happens and never resume.
 #
-# Instead, this script:
+# Instead:
 #   1. Clones the demo repo
-#   2. Writes an idempotent "orchestrator" script that checks marker files
-#      to know which step is next
-#   3. Installs the orchestrator as a systemd service that runs on EVERY
-#      boot (including after 01's reboot) and no-ops once all steps are done
+#   2. Writes a "start-vllm.sh" wrapper + a "vllm-serve.service" systemd unit
+#      that will run vLLM as a proper, supervised service (auto-restart on
+#      crash, survives reboots) — defined here but not started yet, since
+#      the GPU driver and Python env don't exist until steps 1/2 complete.
+#   3. Writes an idempotent "orchestrator" script that checks marker files
+#      to know which step is next, and installs it as a systemd service that
+#      runs on EVERY boot (including after 01's reboot) and no-ops once
+#      all steps are done.
 #
 # State markers live under /opt/bootstrap/state/. Bootstrap progress is
-# logged to /var/log/bootstrap.log.
+# logged to /var/log/bootstrap.log. vLLM server logs go to ~/vllm.log, same
+# as in manual runs.
 # =============================================================================
 set -euo pipefail
 
@@ -31,6 +36,7 @@ STATE_DIR="/opt/bootstrap/state"
 LOG="/var/log/bootstrap.log"
 
 mkdir -p "$STATE_DIR"
+mkdir -p /opt/bootstrap
 touch "$LOG"
 chmod 644 "$LOG"
 
@@ -46,7 +52,69 @@ fi
 chmod +x "$DEMO_PATH"/*.sh || true
 
 # ---------------------------------------------------------------------------
-# Orchestrator script — this is what actually runs 01 -> (reboot) -> 02 -> 03
+# vLLM wrapper script + systemd service (defined now, started later by the
+# orchestrator in Step 3, once the driver + Python env actually exist).
+# ---------------------------------------------------------------------------
+cat > /opt/bootstrap/start-vllm.sh <<'STARTVLLM_EOF'
+#!/bin/bash
+set -euo pipefail
+
+VENV_DIR="/home/ubuntu/vllm-env"
+
+NVCC_PATH=$(find "$VENV_DIR" -iname "nvcc" 2>/dev/null | head -n1)
+if [ -n "$NVCC_PATH" ]; then
+  export CUDA_HOME
+  CUDA_HOME=$(dirname "$(dirname "$NVCC_PATH")")
+  export PATH="$CUDA_HOME/bin:$PATH"
+fi
+
+export VLLM_USE_FLASHINFER_SAMPLER=0
+
+exec "$VENV_DIR/bin/vllm" serve "${MODEL:-Qwen/Qwen3-8B}" \
+  --dtype "${DTYPE:-bfloat16}" \
+  --max-model-len "${MAX_MODEL_LEN:-8192}" \
+  --gpu-memory-utilization "${GPU_MEM_UTIL:-0.90}" \
+  --port "${PORT:-8000}"
+STARTVLLM_EOF
+chmod +x /opt/bootstrap/start-vllm.sh
+
+cat > /etc/systemd/system/vllm-serve.service <<'VLLMUNIT_EOF'
+[Unit]
+Description=vLLM OpenAI-compatible inference server
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/home/ubuntu
+Environment=MODEL=Qwen/Qwen3-8B
+Environment=DTYPE=bfloat16
+Environment=MAX_MODEL_LEN=8192
+Environment=GPU_MEM_UTIL=0.90
+Environment=PORT=8000
+ExecStart=/opt/bootstrap/start-vllm.sh
+Restart=on-failure
+RestartSec=15
+TimeoutStartSec=900
+StandardOutput=append:/home/ubuntu/vllm.log
+StandardError=append:/home/ubuntu/vllm.log
+
+[Install]
+WantedBy=multi-user.target
+VLLMUNIT_EOF
+
+systemctl daemon-reload
+systemctl enable vllm-serve.service
+# NOT started here — the driver and Python venv don't exist yet on first
+# boot. The orchestrator's Step 3 starts it once steps 1 and 2 are done.
+# `enable` means it WILL auto-start on any future reboot of this instance,
+# which is a nice side benefit (server comes back up after a manual reboot).
+
+# ---------------------------------------------------------------------------
+# Orchestrator script — runs 01 -> (reboot) -> 02 -> starts vllm-serve.service
 # ---------------------------------------------------------------------------
 cat > /opt/bootstrap/orchestrator.sh <<'ORCHESTRATOR_EOF'
 #!/bin/bash
@@ -74,8 +142,6 @@ if [ ! -f "$STATE_DIR/01-driver-done" ]; then
     log "01-install-driver.sh returned control (reboot should be imminent) — exiting this run"
     exit 0
   else
-    # We already started step 1 on a previous boot; check if the driver is
-    # now actually loaded (i.e. we're past the reboot).
     if nvidia-smi >/dev/null 2>&1; then
       log "Step 1: driver verified working after reboot"
       touch "$STATE_DIR/01-driver-done"
@@ -98,12 +164,12 @@ if [ ! -f "$STATE_DIR/02-setup-done" ]; then
   log "Step 2: complete"
 fi
 
-# --- Step 3: start the vLLM server in the background ------------------------
+# --- Step 3: start the vLLM server as a proper systemd service -------------
 if [ ! -f "$STATE_DIR/03-serve-started" ]; then
-  log "Step 3: starting 03-serve-model.sh (background, non-interactive mode)"
-  sudo -u ubuntu bash -lc "cd '$DEMO_PATH' && export VLLM_USE_FLASHINFER_SAMPLER=0 && NO_WAIT_TAIL=true nohup ./03-serve-model.sh > /home/ubuntu/vllm-serve-bootstrap.out 2>&1 &"
+  log "Step 3: starting vllm-serve.service"
+  systemctl start vllm-serve.service
   touch "$STATE_DIR/03-serve-started"
-  log "Step 3: server launch triggered — check ~/vllm.log on the instance for startup progress"
+  log "Step 3: vllm-serve.service started — check ~/vllm.log or 'systemctl status vllm-serve' for progress"
   log "Bootstrap complete. Scheduling safety-net auto-shutdown in $${AUTO_SHUTDOWN_MINUTES} minutes."
   shutdown -h "+$${AUTO_SHUTDOWN_MINUTES}" || true
 fi
@@ -111,17 +177,16 @@ fi
 log "orchestrator run finished (all steps done — future boots will no-op)"
 ORCHESTRATOR_EOF
 
-# Fill in the placeholders (done here in user-data, not in the heredoc above,
-# so Terraform's template variables interpolate correctly and shell $ vars
-# inside the orchestrator itself stay literal).
 sed -i "s|__DEMO_PATH__|$DEMO_PATH|g" /opt/bootstrap/orchestrator.sh
 sed -i "s|__AUTO_SHUTDOWN_MINUTES__|$AUTO_SHUTDOWN_MINUTES|g" /opt/bootstrap/orchestrator.sh
 chmod +x /opt/bootstrap/orchestrator.sh
 
 # ---------------------------------------------------------------------------
-# systemd service — runs the orchestrator on every boot. Once step 3's
-# marker exists, ConditionPathExists (negated) makes systemd skip the run
-# entirely, so this safely does nothing on later boots.
+# systemd service for the orchestrator itself — runs on every boot, becomes
+# a no-op once all 3 steps are done (ConditionPathExists, negated).
+# No background child processes are spawned by this unit anymore (Step 3
+# now just does `systemctl start` on an independent unit), so the earlier
+# cgroup-kill-on-deactivate concern doesn't apply here.
 # ---------------------------------------------------------------------------
 cat > /etc/systemd/system/bootstrap-orchestrator.service <<'UNIT_EOF'
 [Unit]
