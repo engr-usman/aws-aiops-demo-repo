@@ -2,6 +2,7 @@
 # Local .terraform directories (provider plugins, modules cache)
 **/.terraform/*
 .terraform/*
+**/.terraform.lock.hcl
 
 # .tfstate files — even though this project uses an S3 remote backend,
 # never commit state locally (a stray local state file could still be
