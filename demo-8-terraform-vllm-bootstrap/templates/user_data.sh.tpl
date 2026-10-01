@@ -70,11 +70,11 @@ fi
 
 export VLLM_USE_FLASHINFER_SAMPLER=0
 
-exec "$VENV_DIR/bin/vllm" serve "${MODEL:-Qwen/Qwen3-8B}" \
-  --dtype "${DTYPE:-bfloat16}" \
-  --max-model-len "${MAX_MODEL_LEN:-8192}" \
-  --gpu-memory-utilization "${GPU_MEM_UTIL:-0.90}" \
-  --port "${PORT:-8000}"
+exec "$VENV_DIR/bin/vllm" serve "$${MODEL:-Qwen/Qwen3-8B}" \
+  --dtype "$${DTYPE:-bfloat16}" \
+  --max-model-len "$${MAX_MODEL_LEN:-8192}" \
+  --gpu-memory-utilization "$${GPU_MEM_UTIL:-0.90}" \
+  --port "$${PORT:-8000}"
 STARTVLLM_EOF
 chmod +x /opt/bootstrap/start-vllm.sh
 
