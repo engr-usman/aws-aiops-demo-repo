@@ -28,8 +28,9 @@ nvidia-smi || { echo "nvidia-smi failed — driver not loaded. Run 01-install-dr
 
 echo "=== Installing matching python3-dev for $(python3 --version) ==="
 sudo apt update
+sudo apt install -y python3.14-venv
 PYVER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-sudo apt install -y python3-dev "python${PYVER}-dev" build-essential python3.14-venv
+sudo apt install -y python3-dev "python${PYVER}-dev" build-essential
 
 echo "=== Creating virtual environment ==="
 python3 -m venv ~/vllm-env
