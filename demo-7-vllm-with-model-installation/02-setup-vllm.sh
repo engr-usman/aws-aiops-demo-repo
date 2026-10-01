@@ -26,11 +26,10 @@ set -euo pipefail
 echo "=== Verifying GPU driver ==="
 nvidia-smi || { echo "nvidia-smi failed — driver not loaded. Run 01-install-driver.sh first and reboot."; exit 1; }
 
-echo "=== Installing matching python3-dev for $(python3 --version) ==="
+echo "=== Installing matching python3-dev + python3-venv for $(python3 --version) ==="
 sudo apt update
-sudo apt install -y python3.14-venv
 PYVER=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
-sudo apt install -y python3-dev "python${PYVER}-dev" build-essential
+sudo apt install -y python3-dev "python${PYVER}-dev" "python${PYVER}-venv" build-essential
 
 echo "=== Creating virtual environment ==="
 python3 -m venv ~/vllm-env
